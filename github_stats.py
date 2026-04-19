@@ -466,10 +466,20 @@ Languages:
         """
         if self._lines_changed is not None:
             return self._lines_changed
+        repos = list(await self.all_repos)
+        # Fetch all repos' contributor stats in parallel so GitHub computes
+        # them simultaneously, avoiding per-repo 202 retry exhaustion.
+        results = await asyncio.gather(*[
+            self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+            for repo in repos
+        ])
         additions = 0
         deletions = 0
-        for repo in await self.all_repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+        for r in results:
+            # query_rest returns dict() on failure; contributor stats return a
+            # list, so skip anything that is not a list.
+            if not isinstance(r, list):
+                continue
             for author_obj in r:
                 # Handle malformed response from the API by skipping this repo
                 if (not isinstance(author_obj, dict)
