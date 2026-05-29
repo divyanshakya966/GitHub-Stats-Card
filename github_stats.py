@@ -231,14 +231,13 @@ query {{
   }}
 }}
 """
-
-        @staticmethod
-        def search_count(query: str) -> str:
-                """
-                :param query: GitHub search query string
-                :return: query to retrieve the total number of matching issues/PRs
-                """
-                return f"""{{
+    @staticmethod
+    def search_count(query: str) -> str:
+        """
+        :param query: GitHub search query string
+        :return: query to retrieve the total number of matching issues/PRs
+        """
+        return f"""{{
     search(type: ISSUE, query: {json.dumps(query)}, first: 1) {{
         issueCount
     }}
