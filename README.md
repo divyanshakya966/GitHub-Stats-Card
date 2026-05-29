@@ -52,9 +52,10 @@ anyone may be able to see the name of one or more private repositories.
 6. If you want to ignore certain languages, add them (separated by commas) to a new secret called 
    `EXCLUDED_LANGS`.
 
-7. By default the languages, stars, forks and repository views do not consider stats from 
-   public repositories that you have forked and contributed to. But if you want to count stats from
-   forked repositories also you can do so by creating a new secret called `COUNT_STATS_FROM_FORKS`. 
+7. By default the repository-based stats for languages, stars and forks do not consider stats from 
+   public repositories that you have forked and contributed to. If you want to count forked repositories
+   also, create a new secret called `COUNT_STATS_FROM_FORKS`. The PRs merged and issues raised stats do
+   not use that secret.
    For the value you can put any random value because the action only checks if the secret is set or not.
 
    <img src='https://raw.githubusercontent.com/rahul-jha98/github-stats-transparent/main/readme_images/Forks.png' height='250px'/>

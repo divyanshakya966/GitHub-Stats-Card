@@ -38,10 +38,8 @@ async def generate_overview(s: Stats) -> None:
     output = re.sub("{{ forks }}", f"{await s.forks:,}", output)
     output = re.sub("{{ contributions }}", f"{await s.total_contributions:,}",
                     output)
-    lines_changed = await s.lines_changed
-    changed = lines_changed[0] + lines_changed[1]
-    output = re.sub("{{ lines_changed }}", f"{changed:,}", output)
-    output = re.sub("{{ views }}", f"{await s.views:,}", output)
+    output = re.sub("{{ prs_merged }}", f"{await s.merged_prs:,}", output)
+    output = re.sub("{{ issues_raised }}", f"{await s.issues_raised:,}", output)
     output = re.sub("{{ repos }}", f"{len(await s.all_repos):,}", output)
 
     generate_output_folder()

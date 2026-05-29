@@ -1,8 +1,9 @@
 #!/usr/bin/python3
 
 import asyncio
+import json
 import os
-from typing import Dict, List, Optional, Set, Tuple, Union
+from typing import Dict, List, Optional, Set, Union
 
 import aiohttp
 import requests
@@ -231,6 +232,19 @@ query {{
 }}
 """
 
+        @staticmethod
+        def search_count(query: str) -> str:
+                """
+                :param query: GitHub search query string
+                :return: query to retrieve the total number of matching issues/PRs
+                """
+                return f"""{{
+    search(type: ISSUE, query: {json.dumps(query)}, first: 1) {{
+        issueCount
+    }}
+}}
+"""
+
 
 class Stats(object):
     """
@@ -251,10 +265,11 @@ class Stats(object):
         self._stargazers = None
         self._forks = None
         self._total_contributions = None
+        self._merged_prs = None
+        self._issues_raised = None
         self._languages = None
         self._repos = None
-        self._lines_changed = None
-        self._views = None        
+        
 
     async def to_str(self) -> str:
         """
@@ -264,16 +279,13 @@ class Stats(object):
         formatted_languages = "\n  - ".join(
             [f"{k}: {v:0.4f}%" for k, v in languages.items()]
         )
-        lines_changed = await self.lines_changed
         return f"""Name: {await self.name}
 Stargazers: {await self.stargazers:,}
 Forks: {await self.forks:,}
 All-time contributions: {await self.total_contributions:,}
+PRs merged: {await self.merged_prs:,}
+Issues raised: {await self.issues_raised:,}
 Repositories with contributions: {len(await self.all_repos)}
-Lines of code added: {lines_changed[0]:,}
-Lines of code deleted: {lines_changed[1]:,}
-Lines of code changed: {lines_changed[0] + lines_changed[1]:,}
-Project page views: {await self.views:,}
 Languages:
   - {formatted_languages}"""
 
@@ -467,69 +479,42 @@ Languages:
         return self._total_contributions
 
     @property
-    async def lines_changed(self) -> Tuple[int, int]:
+    async def merged_prs(self) -> int:
         """
-        :return: count of total lines added, removed, or modified by the user
+        :return: count of merged pull requests authored by the user
         """
-        if self._lines_changed is not None:
-            return self._lines_changed
-        async def repo_lines_changed(repo: str) -> Tuple[int, int]:
-            additions = 0
-            deletions = 0
-            r = await self.queries.query_rest(
-                f"/repos/{repo}/stats/contributors",
-                max_202_retries=15,
-            )
-            if not isinstance(r, list):
-                return additions, deletions
+        if self._merged_prs is not None:
+            return self._merged_prs
 
-            for author_obj in r:
-                # Handle malformed response from the API by skipping this repo
-                if (not isinstance(author_obj, dict)
-                        or not isinstance(author_obj.get("author", {}), dict)):
-                    continue
-                author = author_obj.get("author", {}).get("login", "")
-                if author != self.username:
-                    continue
-
-                for week in author_obj.get("weeks", []):
-                    additions += week.get("a", 0)
-                    deletions += week.get("d", 0)
-
-            return additions, deletions
-
-        repo_totals = await asyncio.gather(
-            *(repo_lines_changed(repo) for repo in sorted(await self.all_repos))
+        result = await self.queries.query(
+            Queries.search_count(f"author:{self.username} is:pr is:merged")
         )
-        additions = sum(total[0] for total in repo_totals)
-        deletions = sum(total[1] for total in repo_totals)
-
-        self._lines_changed = (additions, deletions)
-        return self._lines_changed
+        self._merged_prs = (
+            result
+            .get("data", {})
+            .get("search", {})
+            .get("issueCount", 0)
+        )
+        return self._merged_prs
 
     @property
-    async def views(self) -> int:
+    async def issues_raised(self) -> int:
         """
-        Note: only returns views for the last 14 days (as-per GitHub API)
-        :return: total number of page views the user's projects have received
+        :return: count of issues authored by the user
         """
-        if self._views is not None:
-            return self._views
+        if self._issues_raised is not None:
+            return self._issues_raised
 
-        total = 0
-        for repo in await self.repos:
-            r = await self.queries.query_rest(
-                f"/repos/{repo}/traffic/views",
-                max_202_retries=15,
-            )
-            if not isinstance(r, dict):
-                continue
-            for view in r.get("views", []):
-                total += view.get("count", 0)
-
-        self._views = total
-        return total
-
+        result = await self.queries.query(
+            Queries.search_count(f"author:{self.username} is:issue")
+        )
+        self._issues_raised = (
+            result
+            .get("data", {})
+            .get("search", {})
+            .get("issueCount", 0)
+        )
+        return self._issues_raised
 
 ###############################################################################
 # Main Function
