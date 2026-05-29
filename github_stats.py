@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 import aiohttp
 import requests
@@ -50,7 +50,8 @@ class Queries(object):
                                   json={"query": generated_query})
                 return r.json()
 
-    async def query_rest(self, path: str, params: Optional[Dict] = None) -> Dict:
+    async def query_rest(self, path: str, params: Optional[Dict] = None,
+                         max_202_retries: int = 3) -> Optional[Union[Dict, List]]:
         """
         Make a request to the REST API
         :param path: API path to query
@@ -58,23 +59,27 @@ class Queries(object):
         :return: deserialized REST JSON output
         """
 
-        for _ in range(60):
+        request_path = path[1:] if path.startswith("/") else path
+
+        for attempt in range(max_202_retries):
             headers = {
-                "Authorization": f"token {self.access_token}",
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.access_token}",
+                "X-GitHub-Api-Version": "2022-11-28",
             }
             if params is None:
                 params = dict()
-            if path.startswith("/"):
-                path = path[1:]
             try:
                 async with self.semaphore:
-                    r = await self.session.get(f"https://api.github.com/{path}",
+                    r = await self.session.get(f"https://api.github.com/{request_path}",
                                                headers=headers,
                                                params=tuple(params.items()))
                 if r.status == 202:
                     # print(f"{path} returned 202. Retrying...")
-                    print(f"A path returned 202. Retrying...")
-                    await asyncio.sleep(2)
+                    print(f"{request_path} returned 202. Retrying...")
+                    retry_after = r.headers.get("Retry-After")
+                    wait_seconds = int(retry_after) if retry_after and retry_after.isdigit() else min(30, 2 ** attempt)
+                    await asyncio.sleep(wait_seconds)
                     continue
 
                 result = await r.json()
@@ -84,18 +89,20 @@ class Queries(object):
                 print("aiohttp failed for rest query")
                 # Fall back on non-async requests
                 async with self.semaphore:
-                    r = requests.get(f"https://api.github.com/{path}",
+                    r = requests.get(f"https://api.github.com/{request_path}",
                                      headers=headers,
                                      params=tuple(params.items()))
                     if r.status_code == 202:
-                        print(f"A path returned 202. Retrying...")
-                        await asyncio.sleep(2)
+                        print(f"{request_path} returned 202. Retrying...")
+                        retry_after = r.headers.get("Retry-After")
+                        wait_seconds = int(retry_after) if retry_after and retry_after.isdigit() else min(30, 2 ** attempt)
+                        await asyncio.sleep(wait_seconds)
                         continue
                     elif r.status_code == 200:
                         return r.json()
         # print(f"There were too many 202s. Data for {path} will be incomplete.")
-        print("There were too many 202s. Data for this repository will be incomplete.")
-        return dict()
+        print(f"There were too many 202s for {request_path}. Data for this repository will be incomplete.")
+        return None
 
     @staticmethod
     def repos_overview(contrib_cursor: Optional[str] = None,
@@ -466,10 +473,16 @@ Languages:
         """
         if self._lines_changed is not None:
             return self._lines_changed
-        additions = 0
-        deletions = 0
-        for repo in await self.all_repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+        async def repo_lines_changed(repo: str) -> Tuple[int, int]:
+            additions = 0
+            deletions = 0
+            r = await self.queries.query_rest(
+                f"/repos/{repo}/stats/contributors",
+                max_202_retries=8,
+            )
+            if not isinstance(r, list):
+                return additions, deletions
+
             for author_obj in r:
                 # Handle malformed response from the API by skipping this repo
                 if (not isinstance(author_obj, dict)
@@ -482,6 +495,14 @@ Languages:
                 for week in author_obj.get("weeks", []):
                     additions += week.get("a", 0)
                     deletions += week.get("d", 0)
+
+            return additions, deletions
+
+        repo_totals = await asyncio.gather(
+            *(repo_lines_changed(repo) for repo in sorted(await self.all_repos))
+        )
+        additions = sum(total[0] for total in repo_totals)
+        deletions = sum(total[1] for total in repo_totals)
 
         self._lines_changed = (additions, deletions)
         return self._lines_changed
