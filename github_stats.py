@@ -478,7 +478,7 @@ Languages:
             deletions = 0
             r = await self.queries.query_rest(
                 f"/repos/{repo}/stats/contributors",
-                max_202_retries=8,
+                max_202_retries=15,
             )
             if not isinstance(r, list):
                 return additions, deletions
@@ -518,7 +518,12 @@ Languages:
 
         total = 0
         for repo in await self.repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/traffic/views")
+            r = await self.queries.query_rest(
+                f"/repos/{repo}/traffic/views",
+                max_202_retries=15,
+            )
+            if not isinstance(r, dict):
+                continue
             for view in r.get("views", []):
                 total += view.get("count", 0)
 
